@@ -1,18 +1,22 @@
 from fastapi import FastAPI
 from dotenv import load_dotenv
-import spotipy
-from spotipy.oauth2 import SpotifyClientCredentials
+import pylast
 import os
+
+# fix SSL certificate verification on Mac:
+import ssl
+import certifi
+ssl._create_default_https_context = ssl.create_default_context(cafile=certifi.where())
 
 load_dotenv()
 
 app = FastAPI()
 
-# Spotify connection object (object sp represents MY authenticated connection to Spotify's API):
-sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
-    client_id=os.getenv("SPOTIFY_CLIENT_ID"),
-    client_secret=os.getenv("SPOTIFY_CLIENT_SECRET")
-))
+# Last.fm connection object (object network represents authenticated connection to Last.fm's API):
+network = pylast.LastFMNetwork(
+    api_key=os.getenv("LASTFM_API_KEY"),
+    api_secret=os.getenv("LASTFM_SECRET"),
+)
 
 @app.get("/")
 def read_root():
@@ -20,17 +24,16 @@ def read_root():
 
 
 @app.get("/search") # ← decorator: "when someone hits GET /search..."
-def search(q: str): # ← "...run this function"
+def search(track: str): # ← "...run this function"
     # results holds 5 tracks that matched query q:
-    results = sp.search(q=q, limit=5, type="track")
-    print(results)
+    results = network.search_for_track(track_name=track, artist_name="")
     tracks = []
     # we want to iterate through results to abstract data into only what we need, and put data in tracks list
     # (get rid of excess data like album art, artists etc):
-    for track in results["tracks"]["items"]:
+    page = results.get_next_page()[:5]  # gives you a list of tracks, limit to 5
+    for track in page:
         tracks.append({
-            "name": track["name"],
-            "artist": track["artists"][0]["name"],
-            "spotify_id": track["id"]
+            "name": track.get_name(),
+            "artist": track.get_artist().get_name(),
         })
     return {"results": tracks}
