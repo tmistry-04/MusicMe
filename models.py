@@ -1,4 +1,4 @@
-# defines your tables as Python classes
+# define tables as Python classes
 
 from sqlalchemy import Column, Integer, String, DateTime
 from datetime import datetime
@@ -17,3 +17,12 @@ class History(Base):
     track_name = Column(String)
     artist = Column(String)
     searched_at = Column(DateTime, default=datetime.now)
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True)
+    username = Column(String)
+    email = Column(String)
+    hashed_password = Column(String)
+    created_at = Column(DateTime, default=datetime.now)
+

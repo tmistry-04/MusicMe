@@ -2,8 +2,9 @@ from dotenv import load_dotenv
 import pylast
 import os
 import requests
-from models import Favourite, History
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
+from auth import hash_password, verify_password, create_token, decode_token
+from models import Favourite, History, User
 from database import engine, SessionLocal
 from sqlalchemy.orm import Session
 import models
@@ -32,6 +33,29 @@ def get_db():
     finally:
         db.close()
 
+"""
+use FastAPI's OAuth2 scheme to extract JWT tokens from request headers
+decode the token to get the user's identity and verify they exist in the database
+Protect endpoints use FastAPI's dependency injection to enforce authentication
+"""
+from fastapi.security import OAuth2PasswordBearer
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    try:
+        payload = decode_token(token)
+        print("payload:", payload)
+        email = payload.get("sub")
+        print("email:", email)
+        user = db.query(User).filter(User.email == email).first()
+        print("user:", user)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return user
+    except Exception as e:
+        print("error:", e)
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 @app.get("/")
 def read_root():
@@ -112,9 +136,9 @@ json format of response:
                        {"name":"Bad Blood","playcount":14198282,"mbid":"7fad1aa3-d874-48d8-842a-9ca9afea068e","match":0.
 '''
 
-# DATABASE ENDPOINTS:
-
 from pydantic import BaseModel
+
+# DATABASE ENDPOINTS:
 
 # POST /favourite:
 # create a Pydantic class for POST /favourite HTTP method since parameters come from request body (not URL) to send data that is to be saved, therefore need to define shape of request body
@@ -125,7 +149,7 @@ class FavouriteRequest(BaseModel):
 
 # when the track is favourited, it will take information from request body, and then create a new favourite object extracting data from request body, then commit that to database:
 @app.post("/favourite")
-def add_favourite(request: FavouriteRequest, db: Session = Depends(get_db)):
+def add_favourite(request: FavouriteRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     favourite_track = Favourite(
         track_name = request.track_name,
         artist = request.artist,
@@ -140,12 +164,58 @@ def add_favourite(request: FavouriteRequest, db: Session = Depends(get_db)):
 
 # GET /favourites:
 @app.get("/favourites")
-def get_favourites(db: Session = Depends(get_db)):
+def get_favourites(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     favourites = db.query(Favourite).all()
     return favourites
 
 # GET /history:
 @app.get("/history")
-def get_history(db: Session = Depends(get_db)):
+def get_history(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     history = db.query(History).all()
     return history
+
+# AUTHORIZATION ENDPOINTS:
+
+# POST /register:
+class RegisterRequest(BaseModel):
+    username: str
+    email: str
+    password: str
+
+@app.post("/register")
+def register(request: RegisterRequest, db: Session = Depends(get_db)):
+    hashed_pw = hash_password(request.password)
+    # check if user already registered with this email before:
+    existing_user = db.query(User).filter(User.email == request.email).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    # otherwise create new user:
+    new_user = User(
+        username = request.username,
+        email = request.email,
+        hashed_password = hashed_pw,
+    )
+    db.add(new_user)
+    db.commit()
+    # refresh to fill out created_at and id fields for User class (defined in models.py)
+    db.refresh(new_user)
+    return new_user
+
+
+# POST /login:
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+@app.post("/login")
+def login(request: LoginRequest, db: Session = Depends(get_db)):
+    # find user object inside database that matches request.email that user passed when making login in request:
+    user = db.query(User).filter(User.email == request.email).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not verify_password(request.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # call create token with data = {"sub": user.email} which is a dictionary with data["exp"] added automatically as part of create_token function:
+    return {"token": create_token({"sub": user.email})}
+
