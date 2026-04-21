@@ -1,9 +1,14 @@
-from fastapi import FastAPI
 from dotenv import load_dotenv
 import pylast
 import os
 import requests
-
+from models import Favourite, History
+from fastapi import FastAPI, Depends
+from database import engine, SessionLocal
+from sqlalchemy.orm import Session
+import models
+# creates tables in db:
+models.Base.metadata.create_all(bind=engine)
 # fix SSL certificate verification on Mac:
 import ssl
 import certifi
@@ -19,25 +24,51 @@ network = pylast.LastFMNetwork(
     api_secret=os.getenv("LASTFM_SECRET"),
 )
 
+# to interact with the database in each of the endpoints: GET /favourites, GET /history, POST /favourite
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 @app.get("/")
 def read_root():
     return {"message": "MusicMe is alive!"}
 
 
 @app.get("/search") # ← decorator: "when someone hits GET /search..."
-def search(track: str): # ← "...run this function"
-    # results holds 5 tracks that matched query q:
-    results = network.search_for_track(track_name=track, artist_name="")
+def search(track: str, db: Session = Depends(get_db)): # ← "...run this function"
+    # build URL
+    response = requests.get(
+        "https://ws.audioscrobbler.com/2.0/",
+        params={
+            "method": "track.search",
+            "track": track,
+            "api_key": os.getenv("LASTFM_API_KEY"),
+            "format": "json",
+            "limit": 5
+        }
+    )
+
+    data = response.json()
     tracks = []
-    # we want to iterate through results to abstract data into only what we need, and put data in tracks list
-    # (get rid of excess data like album art, artists etc):
-    page = results.get_next_page()[:5]  # gives you a list of tracks, limit to 5
-    for track in page:
+    for result in data["results"]["trackmatches"]["track"]:
         tracks.append({
-            "name": track.get_name(),
-            "artist": track.get_artist().get_name(),
+            "name": result["name"],
+            "artist": result["artist"],
         })
+
+    history_entry = History(
+        track_name=track,
+        artist=tracks[0]["artist"] if tracks else ""  # save top artist from results since we don't have the artist yet.
+    )
+    db.add(history_entry)
+    db.commit()
+    db.refresh(history_entry)
     return {"results": tracks}
+
 
 # Note: pylast's get_similar() requires user authentication and returned
 # empty results with API key only. Using requests to call Last.fm's REST
@@ -80,3 +111,41 @@ json format of response:
                                  {"#text":"https://lastfm.freetls.fastly.net/i/u/300x300/2a96cbd8b46e442fc41c2b86b821562f.png","size":""}]},
                        {"name":"Bad Blood","playcount":14198282,"mbid":"7fad1aa3-d874-48d8-842a-9ca9afea068e","match":0.
 '''
+
+# DATABASE ENDPOINTS:
+
+from pydantic import BaseModel
+
+# POST /favourite:
+# create a Pydantic class for POST /favourite HTTP method since parameters come from request body (not URL) to send data that is to be saved, therefore need to define shape of request body
+# GET methods don't need a class since params come from URL
+class FavouriteRequest(BaseModel):
+    track_name: str
+    artist: str
+
+# when the track is favourited, it will take information from request body, and then create a new favourite object extracting data from request body, then commit that to database:
+@app.post("/favourite")
+def add_favourite(request: FavouriteRequest, db: Session = Depends(get_db)):
+    favourite_track = Favourite(
+        track_name = request.track_name,
+        artist = request.artist,
+    )
+    db.add(favourite_track)
+    db.commit()
+
+    # we are sending the db the favourite track's track name and artist, but we don't have id or saved_at,
+    # so we are asking database to pass us the values it auto generated using db.refresh, to then return final favourite_track object with all 4 fields filled out:
+    db.refresh(favourite_track)
+    return favourite_track
+
+# GET /favourites:
+@app.get("/favourites")
+def get_favourites(db: Session = Depends(get_db)):
+    favourites = db.query(Favourite).all()
+    return favourites
+
+# GET /history:
+@app.get("/history")
+def get_history(db: Session = Depends(get_db)):
+    history = db.query(History).all()
+    return history
