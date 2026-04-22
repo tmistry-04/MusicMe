@@ -19,6 +19,15 @@ load_dotenv()
 
 app = FastAPI()
 
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Last.fm connection object (object network represents authenticated connection to Last.fm's API):
 network = pylast.LastFMNetwork(
     api_key=os.getenv("LASTFM_API_KEY"),
