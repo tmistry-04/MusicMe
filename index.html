@@ -219,6 +219,11 @@
     font-size: 0.85rem;
 }
 
+.track-saved_at {
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
 .btn-recommend {
     background: none;
     border: 1px solid var(--purple);
@@ -264,20 +269,19 @@
             <input type="text" id="reg-username" placeholder="Username" class="input"/>
             <input type="email" id="reg-email" placeholder="Email" class="input"/>
             <input type="password" id="reg-password" placeholder="Password" class="input"/>
-            <button class="btn-primary" onclick="register()">Create Account</button>
+            <button class="btn-primary" onclick="handleRegister()">Create Account</button>
         </div>
 
         <p id="auth-error" class="error hidden"></p>
     </div>
 </div>
-    </div>
 
     <!-- SEARCH SCREEN -->
     <div id="search-screen" class="hidden">
     <nav class="navbar">
         <h2 class="nav-logo">MusicMe</h2>
         <div class="nav-links">
-            <button onclick="showScreen('favourites-screen')">Favourites</button>
+            <button onclick="loadFavourites(); showScreen('favourites-screen')">Favourites</button>
             <button onclick="handleLogout()">Logout</button>
         </div>
     </nav>
@@ -290,15 +294,37 @@
         </div>
         <div id="search-results"></div>
     </div>
-</div>
     </div>
 
     <!-- RECOMMENDATIONS SCREEN -->
     <div id="recommend-screen" class="hidden">
+        <nav class="navbar">
+            <h2 class="nav-logo">MusicMe</h2>
+            <div class="nav-links">
+                <button onclick="showScreen('search-screen')">← Back to Search</button>
+                <button onclick="loadFavourites(); showScreen('favourites-screen')">Favourites</button>
+                <button onclick="handleLogout()">Logout</button>
+            </div>
+        </nav>
+        <div class="search-container">
+            <h1 class="search-title">You might also like...</h1>
+            <div id="recommend-results"></div>
+        </div>
     </div>
 
     <!-- FAVOURITES SCREEN -->
     <div id="favourites-screen" class="hidden">
+        <nav class="navbar">
+            <h2 class="nav-logo">MusicMe</h2>
+            <div class="nav-links">
+                <button onclick="showScreen('search-screen')">← Back to Search</button>
+                <button onclick="handleLogout()">Logout</button>
+            </div>
+        </nav>
+        <div class="search-container">
+            <h1 class="search-title">Your Favourites</h1>
+            <div id="favourites-results"></div>
+        </div>
     </div>
 
     <script>
@@ -329,8 +355,13 @@
         }
 
         function showScreen(screenId) {
-        document.querySelectorAll('[id$="-screen"]').forEach(s => s.classList.add('hidden'));
-        document.getElementById(screenId).classList.remove('hidden');
+            document.querySelectorAll('[id$="-screen"]').forEach(s => s.classList.add('hidden'));
+            document.getElementById(screenId).classList.remove('hidden');
+
+            if (screenId === 'search-screen') {
+                document.getElementById('search-input').value = '';
+                document.getElementById('search-results').innerHTML = '';
+            }
         }
 
         async function handleSearch() {
@@ -352,7 +383,113 @@
                         <button class="btn-recommend">Recommend →</button>
                     </div>
                 `;
-    });
+            });
+        }
+
+        async function handleRegister() {
+            // get inputs
+            const username = document.getElementById('reg-username').value;
+            const email = document.getElementById('reg-email').value;
+            const password = document.getElementById('reg-password').value;
+            // call api
+            const response = await fetch('http://127.0.0.1:8000/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: username, email: email, password: password })
+            });
+            const data = await response.json();
+            if (response.ok) {
+                switchTab('login');
+            } else {
+                console.log(data.detail); // shows error like "Email already registered"
+            }
+        }
+
+        async function handleRecommend(track, artist) {
+            try {
+                // call api to get 5 recommendations
+                const response = await fetch(`http://127.0.0.1:8000/recommend?track=${track}&artist=${artist}`);
+                const data = await response.json();
+
+                if (!data.results || data.results.length === 0) {
+                    alert('No recommendations found for this track. Try a more popular song!');
+                    return;
+                }
+
+                // switch screen to recommendations
+                showScreen('recommend-screen');
+                const resultsDiv = document.getElementById('recommend-results');
+
+                resultsDiv.innerHTML = '';
+                data.results.forEach(track => {
+                    resultsDiv.innerHTML += `
+                        <div class="track-card" onclick="handleFavourite('${track.name}', '${track.artist}')">
+                            <div class="track-info">
+                                <p class="track-name">${track.name}</p>
+                                <p class="track-artist">${track.artist}</p>
+                            </div>
+                            <button class="btn-recommend">♥ Favourite</button>
+                        </div>
+                    `;
+                });
+            } catch (error) {
+                alert('Something went wrong. Please try again!');
+            }
+        }
+
+        async function handleFavourite(track, artist) {
+            // call api to add song to favourites
+            const response = await fetch(`http://127.0.0.1:8000/favourite`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ track_name: track, artist: artist })
+            });
+            const data = await response.json();
+            alert('Added to favourites! ♥');
+        }
+
+        async function loadFavourites() {
+            // call api to get list of favourites
+            const response = await fetch(`http://127.0.0.1:8000/favourites`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await response.json();
+
+            const resultsDiv = document.getElementById('favourites-results');
+            resultsDiv.innerHTML = '';
+
+            data.forEach(track => {
+                resultsDiv.innerHTML += `
+                    <div class="track-card">
+                        <div class="track-info">
+                            <p class="track-name">${track.track_name}</p>
+                            <p class="track-artist">${track.artist}</p>
+                            <p class="track-artist">Saved: ${new Date(track.saved_at).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                        </div>
+                        <button class="btn-recommend" onclick="handleUnfavourite(${track.id})">✕ Remove</button>
+                    </div>
+                `;
+            });
+        }
+
+        async function handleUnfavourite(id) {
+            const response = await fetch(`http://127.0.0.1:8000/favourite/${id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await response.json();
+            alert('Removed from Favourites');
+            loadFavourites();
+        }
+
+        function handleLogout() {
+            token = null;
+            document.getElementById('login-email').value = '';
+            document.getElementById('login-password').value = '';
+            showScreen('auth-screen');
         }
     </script>
 </body>

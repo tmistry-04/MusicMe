@@ -34,7 +34,7 @@ network = pylast.LastFMNetwork(
     api_secret=os.getenv("LASTFM_SECRET"),
 )
 
-# to interact with the database in each of the endpoints: GET /favourites, GET /history, POST /favourite
+# to interact with the database in each of the endpoints: GET /favourites, GET /history, POST /favourite, DELETE /favourite
 def get_db():
     db = SessionLocal()
     try:
@@ -170,6 +170,15 @@ def add_favourite(request: FavouriteRequest, db: Session = Depends(get_db), curr
     # so we are asking database to pass us the values it auto generated using db.refresh, to then return final favourite_track object with all 4 fields filled out:
     db.refresh(favourite_track)
     return favourite_track
+
+@app.delete("/favourite/{favourite_id}")
+def delete_favourite(favourite_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    favourite = db.query(Favourite).filter(Favourite.id == favourite_id).first()
+    if not favourite:
+        raise HTTPException(status_code=404, detail="Favourite not found")
+    db.delete(favourite)
+    db.commit()
+    return {"message": "Removed from favourites"}
 
 # GET /favourites:
 @app.get("/favourites")
