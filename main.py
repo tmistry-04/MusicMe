@@ -3,6 +3,8 @@ import pylast
 import os
 import requests
 from fastapi import FastAPI, Depends, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from auth import hash_password, verify_password, create_token, decode_token
 from models import Favourite, History, User
 from database import engine, SessionLocal
@@ -70,6 +72,9 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 def read_root():
     return {"message": "MusicMe is alive!"}
 
+@app.get("/app")
+def serve_frontend():
+    return FileResponse("index.html")
 
 @app.get("/search") # ← decorator: "when someone hits GET /search..."
 def search(track: str, db: Session = Depends(get_db)): # ← "...run this function"
